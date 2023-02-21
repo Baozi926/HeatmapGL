@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Document</title>
+    <title>latlon</title>
   </head>
   <body>
     <!-- <script src="https://twgljs.org/dist/3.x/twgl.min.js"></script> -->
@@ -29,7 +29,7 @@
       style="border: black 1px solid"
     ></canvas>
 
-    <script src="./data.js"></script>
+    <script src="./lonlats.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
 
     <script type="module">
@@ -70,10 +70,11 @@
         canvas: document.getElementById("heatmap-image"),
         radius: defaultRadius,
         data: data,
-        width: width, //数据的坐标宽度
-        height: height, //数据的坐标高度
         gradient: g,
+        isLonLat: true,
       });
+
+      console.log("bounday:", heatmap.lonLatInfo); //use these value to put heatmap on map
 
       getGradient(g, {
         canvas: document.getElementById("rampColor-image"),

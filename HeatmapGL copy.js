@@ -1,6 +1,3 @@
-// import * as SphericalMercator from "./sphericalmercator.js";
-import { lonLatToMercator, mercatorToLonLat } from "./utils.js";
-
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {number} radius
@@ -11,31 +8,17 @@ import { lonLatToMercator, mercatorToLonLat } from "./utils.js";
  *
  */
 export class Heatmap {
-  constructor({
-    canvas,
-    radius = 30,
-    width = 1000,
-    height = 1000,
-    data,
-    gradient,
-    isLonLat,
-  }) {
-    if (isLonLat) {
-      this.prepareLatLonData(data, {
-        radius,
-      });
-    } else {
-      this.data = data;
-      //注意，width和height与canvas的高宽无关，是纯数据的
-      this.width = width;
-      this.height = height;
-    }
-
+  constructor({ canvas, radius, width = 1000, height = 1000, data, gradient }) {
     // this.gl = gl;
     this.canvas = canvas;
     this.gl = canvas.getContext("webgl");
     this.radius = radius || 10;
     this.densityProgram = this.getDensityProgram(this.gl);
+
+    this.data = data;
+    //注意，width和height与canvas的高宽无关，是纯数据的
+    this.width = width;
+    this.height = height;
 
     this.textureDensitymap = this.gl.createTexture();
 
@@ -63,11 +46,6 @@ export class Heatmap {
     this.a_Position_density_location = this.gl.getAttribLocation(
       this.densityProgram,
       "a_Position"
-    );
-
-    this.a_Weght_density_location = this.gl.getAttribLocation(
-      this.densityProgram,
-      "a_Weight"
     );
 
     this.heatmapProgram = this.getHeatmapProgram(this.gl);
@@ -130,106 +108,6 @@ export class Heatmap {
       return null;
     }
     return program;
-  }
-
-  prepareLatLonData(data, { radius }) {
-    let maxY = -Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let minX = Infinity;
-
-    this.data = data.map((v) => {
-      const coords = lonLatToMercator([v.x, v.y]);
-      const x = coords[0];
-      const y = coords[1];
-
-      if (x > maxX) {
-        maxX = x;
-      }
-      if (y > maxY) {
-        maxY = y;
-      }
-      if (x < minX) {
-        minX = x;
-      }
-      if (y < minY) {
-        minY = y;
-      }
-
-      return {
-        x: x,
-        y: y,
-        value: v.value,
-      };
-    });
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-
-    const maxSide = Math.max(width, height);
-    const minSide = Math.min(width, height);
-
-    const maxCanvasSize = 2000;
-    const minCanvasSize = 700;
-    let factor = 1;
-    // 限定画布大小范围，防止画布过大影响显示性能
-    if (maxSide > maxCanvasSize) {
-      factor = maxSide / maxCanvasSize;
-      if (minSide / factor < minCanvasSize) {
-        factor = minSide / minCanvasSize;
-      }
-    } else if (minSide < minCanvasSize) {
-      factor = minSide / minCanvasSize;
-      if (maxSide / factor > maxCanvasSize) {
-        factor = maxSide / maxCanvasSize;
-      }
-    }
-
-    const space = radius;
-
-    this.width = width / factor + space * 2;
-    this.height = height / factor + space * 2;
-
-    minX = minX - space * factor;
-    minY = minY - space * factor;
-    maxX = maxX + space * factor;
-    maxY = maxY + space * factor;
-
-    this.lonLatInfo = {
-      minX,
-      minY,
-      leftBottom: mercatorToLonLat([minX, minY]),
-      rightTop: mercatorToLonLat([maxX, maxY]),
-    };
-
-    this.data = this.data.map((v) => {
-      return {
-        value: v.value,
-        x: (v.x - minX) / factor,
-        y: (v.y - minY) / factor,
-      };
-    });
-  }
-
-  dataToGeoJSON() {
-    if (!this.lonLatInfo) {
-      throw new Error("lonLatInfo is absent, the data may not be lonlat data");
-    }
-
-    const { minX, minY } = this.lonLatInfo;
-    return {
-      type: "FeatureCollection",
-      features: this.data.map((v) => {
-        return {
-          type: "Feature",
-          properties: {},
-          geometry: {
-            type: "Point",
-            coordinates: mercatorToLonLat([v.x + minX, minY + v.y]),
-          },
-        };
-      }),
-    };
   }
 
   /**
@@ -408,15 +286,13 @@ export class Heatmap {
   getDensityProgram(gl) {
     var VSHADER_SOURCE = `
     attribute vec4 a_Position;
-    attribute float a_Weight;
     varying float v_weight;
     const highp float ZERO = 1.0 / 255.0 / 16.0;
     uniform float u_radius;
-
     void main() {
-      gl_Position = vec4(a_Position.xy,0.0,1.0) ;
+      gl_Position = a_Position ;
       gl_PointSize = u_radius;
-      v_weight = a_Weight;
+      v_weight = a_Position.z;
     }
   `;
     var FSHADER_SOURCE = `
@@ -473,14 +349,10 @@ export class Heatmap {
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.blendColor(0.0, 0.0, 0.0, 0.0);
 
-    gl.uniform1f(this.radiusLocation, radius);
-
-    let maxWeight = 1;
-
     //cahce positions
     if (!this._positionsCache || !this._weightsCache) {
       var vertices = [];
-      var weightTmp = [];
+
 
       const canvasWidth = this.width;
       const canvasHeight = this.height;
@@ -491,62 +363,38 @@ export class Heatmap {
       this.data.forEach((v) => {
         vertices.push((v.x - halfCanvasWidth) / halfCanvasWidth);
         vertices.push((v.y - halfCanvasHeight) / halfCanvasHeight);
-        weightTmp.push(v.value);
-        if (v.value > maxWeight) {
-          maxWeight = v.value;
-        }
-        // vertices.push(v.value);
+        vertices.push(v.value);
+        // weightArr.push(v.value);
       });
 
       this._positionsCache = new Float32Array(vertices);
-      //将weigh控制在0-1之间
-      this._weightsCache = new Float32Array(
-        weightTmp.map((v) => {
-          return v / maxWeight;
-        })
-      );
+
     }
-    // debugger;
 
     const positions = this._positionsCache;
-    const weights = this._weightsCache;
 
-    var a_Weight = gl.getAttribLocation(program, "a_Weight");
 
-    if (a_Weight < 0) {
-      console.log("Failed to get the storage location of a_weight");
-      return -1;
-    }
 
+    gl.uniform1f(this.radiusLocation, radius);
+
+    //start position
     var a_Position = gl.getAttribLocation(program, "a_Position");
     if (a_Position < 0) {
       console.log("Failed to get the storage location of a_Position");
       return -1;
     }
 
-    //start position
-
     const a_PositionBuffer = gl.createBuffer();
 
     gl.bindBuffer(gl.ARRAY_BUFFER, a_PositionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
-    gl.vertexAttribPointer(a_Position, 2, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(a_Position);
+    gl.vertexAttribPointer(a_Position, 3, gl.FLOAT, false, 0, 0);
     //end position
 
-    // start a_Weight
 
-    const a_WeightBuffer = gl.createBuffer();
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, a_WeightBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, weights, gl.STATIC_DRAW);
-
-    gl.enableVertexAttribArray(a_Weight);
-    gl.vertexAttribPointer(a_Weight, 1, gl.FLOAT, false, 0, 0);
-    // end a_Weight
-
-    gl.drawArrays(gl.POINTS, 0, positions.length / 2);
+    gl.drawArrays(gl.POINTS, 0, positions.length / 3);
   }
 
   initFramebufferObject(gl, { width, height, texture }) {
