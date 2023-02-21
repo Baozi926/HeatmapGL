@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>latlon</title>
+  </head>
+  <body>
+    <!-- <script src="https://twgljs.org/dist/3.x/twgl.min.js"></script> -->
+    <!-- <canvas
+      style="border: black 1px solid"
+      id="density-image"
+      width="400"
+      height="400"
+    ></canvas> -->
+
+    <canvas
+      style="border: black 1px solid"
+      id="heatmap-image"
+      width="2000"
+      height="2000"
+    ></canvas>
+
+    <canvas
+      id="rampColor-image"
+      width="100"
+      height="10"
+      style="border: black 1px solid"
+    ></canvas>
+
+    <!-- <script src="./lonlats.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
+
+    <script type="module">
+      import { Heatmap, getGradient } from "./HeatmapGL.js";
+
+      const number = 1000000;
+
+      var data = [];
+
+      for (let i = 0; i < number; i++) {
+        data.push({
+          x: 108 + Math.random() / 5,
+          y: 22 + Math.random() / 5,
+          value: Math.random(),
+        });
+      }
+
+      console.log("data length: ", data.length);
+
+      const defaultRadius = 7;
+
+      var GUI = lil.GUI;
+
+      const gui = new GUI();
+      gui.domElement.style.position = "absolute";
+      gui.domElement.style.right = "10px";
+      gui.domElement.style.top = "10px";
+
+      const heatMapGUIParams = {
+        半径: defaultRadius,
+      };
+
+      gui
+        .add(heatMapGUIParams, "半径")
+        .min(1)
+        .max(14)
+        .onChange((val) => {
+          heatmap.radius = val;
+          console.time("draw");
+          heatmap.draw();
+          console.timeEnd("draw");
+        });
+
+      var g = {
+        0: "rgb(0,0,255,0)",
+        0.25: "rgb(0,0,255)",
+        0.55: "rgb(0,255,0)",
+        0.85: "yellow",
+        1.0: "rgb(255,0,0)",
+      };
+      var heatmap = new Heatmap({
+        canvas: document.getElementById("heatmap-image"),
+        radius: defaultRadius,
+        data: data,
+        gradient: g,
+        isLonLat: true,
+      });
+
+      console.log("bounday:", heatmap.lonLatInfo); //use these value to put heatmap on map
+
+      getGradient(g, {
+        canvas: document.getElementById("rampColor-image"),
+        width: 100,
+        height: 10,
+      });
+
+      console.time("first draw");
+      heatmap.draw();
+      console.timeEnd("first draw");
+
+      function render() {
+        heatmap.draw();
+
+        window.requestAnimationFrame(() => {
+          render();
+        });
+      }
+
+      window.heatmap = heatmap;
+    </script>
+  </body>
+</html>
