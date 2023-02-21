@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <!-- <script src="https://twgljs.org/dist/3.x/twgl.min.js"></script> -->
+    <canvas
+      style="border: black 1px solid"
+      id="density-image"
+      width="400"
+      height="400"
+    ></canvas>
+
+    <canvas
+      style="border: black 1px solid"
+      id="heatmap-image"
+      width="400"
+      height="400"
+    ></canvas>
+
+    <canvas
+      id="rampColor-image"
+      width="100"
+      height="10"
+      style="border: black 1px solid"
+    ></canvas>
+
+    <script src="./data.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
+
+    <script type="module">
+      class Texture {
+        channels;
+
+        type;
+
+        chancount;
+
+        target;
+        handle;
+        width;
+        height;
+
+        constructor(gl, params) {
+          if (params == null) {
+            params = {};
+          }
+
+          this.gl = gl;
+
+          const ref = (params.channels ?? "rgba").toUpperCase();
+          this.channels = this.gl[ref];
+
+          if (typeof params.type === "number") {
+            this.type = params.type;
+          } else {
+            const ref1 = `${params.type ?? "unsigned_byte"}`.toUpperCase();
+            this.type = this.gl[ref1];
+          }
+
+          switch (this.channels) {
+            case this.gl.RGBA:
+              this.chancount = 4;
+              break;
+            case this.gl.RGB:
+              this.chancount = 3;
+              break;
+            case this.gl.LUMINANCE_ALPHA:
+              this.chancount = 2;
+              break;
+            default:
+              this.chancount = 1;
+          }
+
+          this.target = this.gl.TEXTURE_2D;
+          this.handle = this.gl.createTexture();
+          this.width = 0;
+          this.height = 0;
+        }
+
+        destroy() {
+          return this.gl.deleteTexture(this.handle);
+        }
+
+        bind(unit) {
+          if (unit == null || unit < 0) {
+            unit = 0;
+          }
+          if (unit > 15) {
+            throw "Texture unit too large: " + unit;
+          }
+          this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+          this.gl.bindTexture(this.target, this.handle);
+          return this;
+        }
+
+        setSize(width, height) {
+          this.width = width;
+          this.height = height;
+          this.gl.texImage2D(
+            this.target,
+            0,
+            this.channels,
+            this.width,
+            this.height,
+            0,
+            this.channels,
+            this.type,
+            null
+          );
+          return this;
+        }
+
+        upload(data) {
+          this.width = data.width;
+          this.height = data.height;
+          this.gl.texImage2D(
+            this.target,
+            0,
+            this.channels,
+            this.channels,
+            this.type,
+            data
+          );
+          return this;
+        }
+
+        linear() {
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_MAG_FILTER,
+            this.gl.LINEAR
+          );
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_MIN_FILTER,
+            this.gl.LINEAR
+          );
+          return this;
+        }
+
+        nearest() {
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_MAG_FILTER,
+            this.gl.NEAREST
+          );
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_MIN_FILTER,
+            this.gl.NEAREST
+          );
+          return this;
+        }
+
+        clampToEdge() {
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_WRAP_S,
+            this.gl.CLAMP_TO_EDGE
+          );
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_WRAP_T,
+            this.gl.CLAMP_TO_EDGE
+          );
+          return this;
+        }
+
+        repeat() {
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_WRAP_S,
+            this.gl.REPEAT
+          );
+          this.gl.texParameteri(
+            this.target,
+            this.gl.TEXTURE_WRAP_T,
+            this.gl.REPEAT
+          );
+          return this;
+        }
+      }
+
+const defaultRadius = 10;
+
+      function drawDensityMap() {
+        var VSHADER_SOURCE = `
+        attribute vec4 a_Position;
+        varying vec2 v_extrude;
+        // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
+
+        const highp float ZERO = 1.0 / 255.0 / 16.0;
+
+
+        uniform float u_radius;
+        void main() {
+          // vec2 st = gl_FragCoord.xy;
+          // vec2 unscaled_extrude = vec2(mod(a_Position.xy, 2.0) * 2.0 - 1.0);
+          // float weight = 100.0;
+          // float intensity = 4.0;
+
+          // float S = sqrt(-2.0 * log(ZERO / weight / intensity / 0.3989422804014327)) / 3.0;
+          // v_extrude = S * unscaled_extrude;
+
+          gl_Position = a_Position ;
+          gl_PointSize = u_radius;
+        }
+      `;
+        var FSHADER_SOURCE = `
+            #ifdef GL_ES
+            precision mediump float;
+            #endif
+          //   uniform vec2 u_resolution;
+            const highp float ZERO = 1.0 / 255.0 / 16.0;
+            const highp  float GAUSS_COEF = 0.3989422804014327;
+            uniform sampler2D gradientTexture;
+              void main() {
+                  float weight = 1.0;
+                  float u_intensity = 2.0;
+                  // float GAUSS_COEF = 0.3989422804014327;
+                  // float ZERO =
+
+                  vec2 st = gl_PointCoord.xy;
+
+                  float pct = 0.0;
+
+                  float S = sqrt(-2.0 * log(ZERO / weight / u_intensity / GAUSS_COEF)) / 3.0;
+                  float distance = distance(st,vec2(0.5)) * 2.0;  // 把距离规整到0 到1 之间
+
+                  pct = distance * S;
+
+                  float d = -0.5 * 3.0 * 3.0 * dot(pct, pct);
+                  float val = weight * u_intensity * 0.3989422804014327 * exp(d);
+                  vec4 color =  texture2D(gradientTexture, vec2(val * 100.0, 0.5));
+                  gl_FragColor = vec4(val, 1.0, 1.0, 1.0);
+                //   gl_FragColor = color;
+
+              }
+      `;
+
+        var canvas = document.getElementById("density-image");
+        var gl = canvas.getContext("webgl");
+        const program = initShaders(gl, VSHADER_SOURCE, FSHADER_SOURCE);
+
+        //*** init texture
+
+        const textureGradient = new Texture(gl, {
+          channels: "rgba",
+        })
+          .bind(0)
+          .setSize(256, 1)
+          .nearest()
+          .clampToEdge();
+
+        textureGradient.upload(
+          window.document.getElementById("rampColor-image")
+        );
+
+        textureGradient.bind(0);
+
+        const location_gradientTexture = gl.getUniformLocation(
+          program,
+          "gradientTexture"
+        );
+
+        gl.uniform1i(location_gradientTexture, 0);
+
+        //*** end init texture
+
+        window.gl = gl;
+        if (!gl) {
+          console.log("Failed to retrieve the <canvas> element");
+          return;
+        }
+
+        if (!program) {
+          console.log("Failed to intialize shaders.");
+          return;
+        }
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.blendColor(0.0, 0.0, 0.0, 0.0);
+
+        var vertices = [];
+
+        const canvasWidth = data.width;
+        const canvasHeight = data.height;
+        // gl.viewport(0, 0, canvasWidth, canvasHeight);
+
+        const halfCanvasWidth = canvasWidth / 2;
+        const halfCanvasHeight = canvasHeight / 2;
+
+        const pixelSizeX = 1 / halfCanvasWidth;
+        const pixelSizeY = 1 / halfCanvasHeight;
+
+        data.data.data.forEach((v) => {
+          vertices.push((v.x - halfCanvasWidth) / halfCanvasWidth);
+          vertices.push((v.y - halfCanvasHeight) / halfCanvasHeight);
+        });
+
+        const radiusLocation = gl.getUniformLocation(program, "u_radius");
+        gl.uniform1f(radiusLocation, defaultRadius);
+
+        window.changeDistanceImageRadius = function (val) {
+          gl.uniform1f(radiusLocation, val);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          renderPoints();
+        };
+
+        var a_Position = gl.getAttribLocation(program, "a_Position");
+        if (a_Position < 0) {
+          console.log("Failed to get the storage location of a_Position");
+          return -1;
+        }
+
+        function renderPoints() {
+          for (var l = 0; l < vertices.length; l += 2) {
+            gl.vertexAttrib2f(a_Position, vertices[l], vertices[l + 1]);
+            gl.drawArrays(gl.POINTS, 0, 1);
+          }
+        }
+
+        renderPoints();
+      }
+
+      function drawHeatmap() {
+        /*第三部分 initVertexBuffers() 设置顶点坐标和纹理坐标 调用initTextures()进行下一步处理*/
+        function initVertexBuffers(gl, program) {
+          //四个绘制顶点 和 原图的对应位置关系
+          var verticesSizes = new Float32Array([
+            -1,
+            1,
+            0.0,
+            1.0,
+            -1,
+            -1,
+            0.0,
+            0.0,
+            1,
+            1,
+            1.0,
+            1.0,
+            1,
+            -1,
+            1.0,
+            0.0,
+          ]);
+
+          var n = 4;
+          var vertexSizeBuffer = gl.createBuffer();
+          if (!vertexSizeBuffer) {
+            console.log("无法创建缓冲区");
+            return -1;
+          }
+          // 是设置缓冲为当前使用缓冲
+          gl.bindBuffer(gl.ARRAY_BUFFER, vertexSizeBuffer);
+          // 将数据拷贝到缓冲
+          gl.bufferData(gl.ARRAY_BUFFER, verticesSizes, gl.STATIC_DRAW);
+          // 询问顶点数据应该放在哪里,获取 WebGL 给属性分配的地址
+          var a_Position = gl.getAttribLocation(program, "a_Position");
+          if (a_Position < 0) {
+            console.log("无法获取到存储位置");
+            return;
+          }
+
+          //获取数组一个值所占的字节数
+          var fsize = verticesSizes.BYTES_PER_ELEMENT;
+
+          gl.vertexAttribPointer(a_Position, 2, gl.FLOAT, false, fsize * 4, 0);
+          gl.enableVertexAttribArray(a_Position);
+
+          //将顶点的纹理坐标分配给a_TexCoord并开启它
+          var a_TexCoord = gl.getAttribLocation(program, "a_TexCoord");
+          if (a_TexCoord < 0) {
+            console.log("无法获取到存储位置");
+            return;
+          }
+
+          //将纹理坐标赋值
+          gl.vertexAttribPointer(
+            a_TexCoord,
+            2,
+            gl.FLOAT,
+            false,
+            fsize * 4,
+            fsize * 2
+          );
+          gl.enableVertexAttribArray(a_TexCoord);
+          return n;
+        }
+
+        /*第四部分 initTextures() 创建纹理对象 并调用纹理绘制方法*/
+        function initTextures(gl, n, program) {
+          var texture = gl.createTexture(); //创建纹理对象
+          if (!texture) {
+            console.log("无法创建纹理对象");
+            return;
+          }
+
+          //获取u_Sampler的存储位置
+          var u_Sampler = gl.getUniformLocation(program, "u_Sampler");
+          if (u_Sampler < 0) {
+            console.log("无法获取变量的存储位置");
+            return;
+          }
+
+          //创建Image对象，并绑定加载完成事件
+          const canvas = document.getElementById("density-image");
+
+          loadTexture(n, texture, u_Sampler, canvas);
+          return true;
+        }
+
+        /*第五部分 设置纹理相关信息供WebGL使用，并进行绘制*/
+        function loadTexture(n, texture, u_Sampler, image) {
+          //对纹理图像进行y轴反转
+          //*** init texture
+
+          const textureGradient = new Texture(gl, {
+            channels: "rgba",
+          })
+            .bind(0)
+            .setSize(256, 1)
+            .nearest()
+            .clampToEdge();
+
+          textureGradient.upload(
+            window.document.getElementById("density-image")
+          );
+
+          textureGradient.bind(0);
+
+          const location_gradientTexture = gl.getUniformLocation(
+            program,
+            "u_Sampler"
+          );
+
+          gl.uniform1i(location_gradientTexture, 0);
+
+          //*** end init texture
+
+          //--start load color ramp
+          const rampColor = new Texture(gl, {
+            channels: "rgba",
+          })
+            .bind(1)
+            .setSize(256, 1)
+            .nearest()
+            .clampToEdge();
+
+          rampColor.upload(window.document.getElementById("rampColor-image"));
+
+          rampColor.bind(1);
+
+          const location_rampColor = gl.getUniformLocation(
+            program,
+            "u_ramplColor"
+          );
+
+          gl.uniform1i(location_rampColor, 1);
+
+          //--end load color ramp
+
+          // //绘制
+          //   gl.clearColor(1, 1, 1, 1);
+
+          gl.clearColor(0.0, 0.0, 0.0, 0.0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          // gl.drawArrays(gl.TRIANGLE_STRIP,0,n);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, n);
+
+          window.redrawColorMap = function () {
+            const textureGradient = new Texture(gl, {
+              channels: "rgba",
+            })
+              .bind(0)
+              .setSize(256, 1)
+              .nearest()
+              .clampToEdge();
+
+            textureGradient.upload(
+              window.document.getElementById("density-image")
+            );
+
+            textureGradient.bind(0);
+
+            const location_gradientTexture = gl.getUniformLocation(
+              program,
+              "u_Sampler"
+            );
+
+            gl.uniform1i(location_gradientTexture, 0);
+            gl.clearColor(0.0, 0.0, 0.0, 0.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            // gl.drawArrays(gl.TRIANGLE_STRIP,0,n);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, n);
+          };
+        }
+
+        /*第一部分顶点着色器接收顶点的纹理坐标，传递给片元着色器*/
+        var VSHADER_SOURCE =
+          "" +
+          "attribute vec4 a_Position;" + //
+          "attribute vec2 a_TexCoord;" + //
+          "varying vec2 v_TexCoord;" + //
+          "void main(){" +
+          "   gl_Position = a_Position;" +
+          "   v_TexCoord = a_TexCoord;" + //
+          "}";
+
+        var FSHADER_SOURCE =
+          "" +
+          "precision mediump float;" +
+          "uniform sampler2D u_Sampler;" +
+          "uniform sampler2D u_ramplColor;" +
+          "varying vec2 v_TexCoord;" +
+          "void main(){" +
+          "   vec4 color = texture2D(u_Sampler,v_TexCoord);" +
+          "   float value =  color.r; " +
+          "   vec4 c =  texture2D(u_ramplColor, vec2(value , 0.5)); " +
+          `   gl_FragColor =  c;` +
+          "}";
+
+        var canvas = document.getElementById("heatmap-image");
+        var gl = canvas.getContext("webgl");
+
+        var program = initShaders(gl, VSHADER_SOURCE, FSHADER_SOURCE);
+        var n = initVertexBuffers(gl, program);
+        initTextures(gl, n, program);
+      }
+
+      function initShaders(gl, vsrc, fsrc) {
+        // 创建顶点、片元着色器对象
+        let vertexShader = gl.createShader(gl.VERTEX_SHADER);
+        let fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+
+        // 引入顶点、片元着色器代码
+        gl.shaderSource(vertexShader, vsrc);
+        gl.shaderSource(fragmentShader, fsrc);
+
+        // 编译着色器
+        gl.compileShader(vertexShader);
+        gl.compileShader(fragmentShader);
+
+        // 创建程序对象
+        let program = gl.createProgram();
+
+        // 附着顶点、片元着色器对象到程序对象
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+
+        // 链接程序对象
+        gl.linkProgram(program);
+        // 使用这个程序对象
+        gl.useProgram(program);
+
+        // 返回程序
+        return program;
+      }
+
+      function _getColorRamp() {
+        const defaultGradient = {
+          0: "rgb(0,0,255,0)",
+          0.25: "rgb(0,0,255)",
+          0.55: "rgb(0,255,0)",
+          0.85: "yellow",
+          1.0: "rgb(255,0,0)",
+        };
+
+        var gradientConfig = defaultGradient;
+        var paletteCanvas = document.getElementById("rampColor-image");
+        var paletteCtx = paletteCanvas.getContext("2d");
+
+        paletteCanvas.width = 256;
+        paletteCanvas.height = 1;
+
+        const gradient = paletteCtx.createLinearGradient(0, 0, 256, 1);
+        for (var key in gradientConfig) {
+          gradient.addColorStop(parseFloat(key), gradientConfig[key]);
+        }
+
+        paletteCtx.fillStyle = gradient;
+        paletteCtx.fillRect(0, 0, 256, 1);
+
+        return paletteCanvas;
+      }
+
+      var GUI = lil.GUI;
+
+      const gui = new GUI();
+      gui.domElement.style.position = "absolute";
+      gui.domElement.style.right = "10px";
+      gui.domElement.style.top = "10px";
+
+      const heatMapGUIParams = {
+        半径: defaultRadius,
+      };
+
+      gui
+        .add(heatMapGUIParams, "半径")
+        .min(1)
+        .max(30)
+        .onChange((val) => {
+          console.time("start-change");
+          changeDistanceImageRadius(val);
+          redrawColorMap();
+          console.timeEnd("start-change");
+        });
+
+      _getColorRamp();
+      drawDensityMap();
+      drawHeatmap();
+    </script>
+  </body>
+</html>

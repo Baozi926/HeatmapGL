@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <!-- <script src="https://twgljs.org/dist/3.x/twgl.min.js"></script> -->
+    <!-- <canvas
+      style="border: black 1px solid"
+      id="density-image"
+      width="400"
+      height="400"
+    ></canvas> -->
+
+    <canvas
+      style="border: black 1px solid"
+      id="heatmap-image"
+      width="400"
+      height="400"
+    ></canvas>
+
+    <canvas
+      id="rampColor-image"
+      width="100"
+      height="10"
+      style="border: black 1px solid"
+    ></canvas>
+
+    <script src="./data.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
+
+    <script type="module">
+      import { Heatmap, getGradient } from "./HeatmapGL.js";
+
+      const defaultRadius = 12;
+
+      var GUI = lil.GUI;
+
+      const gui = new GUI();
+      gui.domElement.style.position = "absolute";
+      gui.domElement.style.right = "10px";
+      gui.domElement.style.top = "10px";
+
+      const heatMapGUIParams = {
+        半径: defaultRadius,
+      };
+
+      gui
+        .add(heatMapGUIParams, "半径")
+        .min(1)
+        .max(30)
+        .onChange((val) => {
+          heatmap.radius = val;
+          console.time("draw");
+          heatmap.draw();
+          console.timeEnd("draw");
+        });
+
+      var g = {
+        0: "rgb(0,0,255,0)",
+        0.25: "rgb(0,0,255)",
+        0.55: "rgb(0,255,0)",
+        0.85: "yellow",
+        1.0: "rgb(255,0,0)",
+      };
+      var heatmap = new Heatmap({
+        canvas: document.getElementById("heatmap-image"),
+        radius: defaultRadius,
+        data: data,
+        width: 1928, //数据的坐标宽度
+        height: 2090, //数据的坐标高度
+        gradient: g,
+      });
+
+      getGradient(g, {
+        canvas: document.getElementById("rampColor-image"),
+        width: 100,
+        height: 10,
+      });
+
+      heatmap.draw();
+
+      function render() {
+        heatmap.draw();
+
+        window.requestAnimationFrame(() => {
+          render();
+        });
+      }
+
+      window.heatmap = heatmap;
+    </script>
+  </body>
+</html>
